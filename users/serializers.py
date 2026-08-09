@@ -58,3 +58,12 @@ class AuthResponseSerializer(serializers.Serializer):
     user = UserSerializer()
     access = serializers.CharField()
     refresh = serializers.CharField()
+
+
+class TokenPairResponseSerializer(serializers.Serializer):
+    access = serializers.CharField()
+    refresh = serializers.CharField()
+
+
+class AccessTokenResponseSerializer(serializers.Serializer):
+    access = serializers.CharField()
