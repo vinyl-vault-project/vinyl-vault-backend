@@ -17,7 +17,7 @@ and Django REST Framework and uses PostgreSQL as its database.
 
 ## Project status
 
-The repository currently contains the initial backend scaffold:
+The repository currently contains the backend foundation and the first MVP APIs:
 
 - Django configuration;
 - PostgreSQL connection through environment variables;
@@ -26,7 +26,9 @@ The repository currently contains the initial backend scaffold:
 - OpenAPI schema and Swagger UI;
 - CORS configuration for frontend integration;
 - custom user model with email-based authentication;
-- JWT registration, login, refresh, logout, and current-user endpoints.
+- JWT registration, login, refresh, logout, and current-user endpoints;
+- catalog database models for releases and physical products;
+- an authenticated, server-side Cart API with stock and ownership validation.
 
 ## Project structure
 
@@ -44,8 +46,17 @@ vinyl-vault-backend/
 |   |-- validators.py     # Password complexity validation
 |   |-- views.py          # JWT authentication API views
 |   `-- urls.py           # Authentication routes
+|-- catalog/
+|   |-- models/           # Music catalog and physical product models
+|   `-- admin.py          # Catalog administration configuration
+|-- orders/
+|   |-- models/           # Cart and CartItem models
+|   |-- serializers.py    # Cart request and response schemas
+|   |-- views.py          # Cart API views and business validation
+|   `-- urls.py           # Cart routes
 |-- tests/
-|   `-- users/            # User model and authentication API tests
+|   |-- users/            # User model and authentication API tests
+|   `-- orders/           # Cart model and API tests
 |-- .env.example          # Environment variable template
 |-- .dockerignore
 |-- .gitignore
@@ -190,6 +201,10 @@ settings.
 | `POST` | `/api/v1/auth/token/refresh/` | Exchange a refresh token for a new access token |
 | `POST` | `/api/v1/auth/logout/` | Blacklist a refresh token |
 | `GET` | `/api/v1/auth/me/` | Return the authenticated user's profile |
+| `GET` | `/api/v1/cart/` | Return the authenticated user's cart |
+| `POST` | `/api/v1/cart/items/` | Add a product to the cart |
+| `PATCH` | `/api/v1/cart/items/{item_id}/` | Update a cart item quantity |
+| `DELETE` | `/api/v1/cart/items/{item_id}/` | Remove an item from the cart |
 | `GET` | `/api/v1/docs/` | Interactive Swagger UI |
 | `GET` | `/api/v1/schema/` | OpenAPI schema |
 | varies | `/admin/` | Django administration site |
@@ -202,8 +217,8 @@ the Django application responds; it does not verify PostgreSQL availability.
 
 The API uses JWT bearer authentication. Access tokens authorize API requests,
 while refresh tokens are used to obtain new access tokens. Registration, login,
-token refresh, and logout are public endpoints. `/api/v1/auth/me/` requires a
-valid access token.
+token refresh, and logout are public endpoints. Protected endpoints such as
+`/api/v1/auth/me/` and all Cart endpoints require a valid access token.
 
 ### Register
 
@@ -328,6 +343,132 @@ Content-Type: application/json
 
 Logout blacklists the refresh token. The frontend must also remove its stored
 access and refresh tokens.
+
+## Cart API
+
+The Cart API is available only to authenticated users. Send the JWT access token
+with every Cart request:
+
+```http
+Authorization: Bearer <access-token>
+```
+
+Each user has one server-side cart. The backend creates it automatically when it
+is first requested or when the first product is added. Guest carts are not
+supported.
+
+### Get the current cart
+
+```http
+GET /api/v1/cart/
+Authorization: Bearer <access-token>
+```
+
+An empty cart returns `200 OK` with an empty `items` array and a total of
+`"0.00"`. A populated cart has the following structure:
+
+```json
+{
+  "id": 1,
+  "items": [
+    {
+      "id": 12,
+      "product": {
+        "id": 7,
+        "release": {
+          "id": 5,
+          "slug": "endtroducing",
+          "title": "Endtroducing.....",
+          "cover_url": "https://example.com/covers/endtroducing.jpg",
+          "release_year": 1996,
+          "artists": [
+            {
+              "id": 2,
+              "name": "DJ Shadow",
+              "slug": "dj-shadow"
+            }
+          ]
+        },
+        "price": "34.99",
+        "stock_quantity": 4,
+        "is_active": true
+      },
+      "quantity": 2,
+      "subtotal": "69.98",
+      "added_at": "2026-08-17T10:30:00Z"
+    }
+  ],
+  "total": "69.98",
+  "created_at": "2026-08-17T10:20:00Z",
+  "updated_at": "2026-08-17T10:30:00Z"
+}
+```
+
+Cart prices are not stored as snapshots. `price`, `subtotal`, and `total` use the
+current `Product.price` whenever the cart is returned.
+
+### Add a product
+
+```http
+POST /api/v1/cart/items/
+Authorization: Bearer <access-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "product_id": 7,
+  "quantity": 2
+}
+```
+
+`quantity` is optional and defaults to `1`. A successful request returns
+`201 Created` with the created CartItem representation.
+
+The same Product cannot appear in one cart more than once. Repeating the request
+for a Product that is already present returns `409 Conflict`; use the quantity
+update endpoint instead.
+
+### Update quantity
+
+```http
+PATCH /api/v1/cart/items/12/
+Authorization: Bearer <access-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "quantity": 3
+}
+```
+
+A successful request returns `200 OK` with the updated CartItem. Quantity must
+be at least `1` and cannot exceed the Product's current `stock_quantity`.
+
+### Remove an item
+
+```http
+DELETE /api/v1/cart/items/12/
+Authorization: Bearer <access-token>
+```
+
+A successful deletion returns `204 No Content`.
+
+### Validation and status codes
+
+| Status | Meaning |
+| --- | --- |
+| `200 OK` | Cart retrieved or quantity updated |
+| `201 Created` | Product added to the cart |
+| `204 No Content` | Cart item removed |
+| `400 Bad Request` | Invalid Product, inactive Product, or invalid/out-of-stock quantity |
+| `401 Unauthorized` | A valid JWT access token was not provided |
+| `404 Not Found` | The CartItem does not exist or belongs to another user |
+| `409 Conflict` | The Product is already present in the cart |
+
+Cart operations never reserve or decrement stock. Current stock and prices must
+be validated again during Checkout, which is outside the scope of this API.
 
 ## Frontend integration
 
