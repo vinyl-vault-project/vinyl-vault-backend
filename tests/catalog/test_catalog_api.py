@@ -30,32 +30,32 @@ class SearchEndpointTests(APITestCase):
             release_year=1996,
             price="20.00",
         )
-        self.url = reverse("release-list")
+        self.url = reverse("catalog:release-list")
 
     def test_search_by_album_title(self):
-        response = self.client.get(self.url, {"q": "Endtroducing"})
+        response = self.client.get(self.url, {"search": "Endtroducing"})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         titles = [r["title"] for r in self._results(response)]
         self.assertIn("Endtroducing", titles)
         self.assertNotIn("Selected Ambient Works 85-92", titles)
 
     def test_search_by_artist_name(self):
-        response = self.client.get(self.url, {"q": "DJ Shadow"})
+        response = self.client.get(self.url, {"search": "DJ Shadow"})
         titles = [r["title"] for r in self._results(response)]
         self.assertIn("Endtroducing", titles)
 
     def test_search_is_case_insensitive(self):
-        response = self.client.get(self.url, {"q": "aphex twin"})
+        response = self.client.get(self.url, {"search": "aphex twin"})
         titles = [r["title"] for r in self._results(response)]
         self.assertIn("Selected Ambient Works 85-92", titles)
 
     def test_search_partial_match(self):
-        response = self.client.get(self.url, {"q": "shadow"})
+        response = self.client.get(self.url, {"search": "shadow"})
         titles = [r["title"] for r in self._results(response)]
         self.assertIn("Endtroducing", titles)
 
     def test_search_no_results_returns_empty_list_not_error(self):
-        response = self.client.get(self.url, {"q": "Nonexistent Album XYZ"})
+        response = self.client.get(self.url, {"search": "Nonexistent Album XYZ"})
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(len(self._results(response)), 0)
 
@@ -71,13 +71,13 @@ class SearchEndpointTests(APITestCase):
         self.assertIn("Selected Ambient Works 85-92", titles)
 
     def test_filter_by_release_year_range(self):
-        response = self.client.get(self.url, {"yearFrom": "1995", "yearTo": "2000"})
+        response = self.client.get(self.url, {"year_from": "1995", "yearTo": "2000"})
         titles = [r["title"] for r in self._results(response)]
         self.assertIn("Endtroducing", titles)
         self.assertNotIn("Selected Ambient Works 85-92", titles)
 
     def test_combined_filters_use_and_logic(self):
-        response = self.client.get(self.url, {"genre": "electronic", "yearFrom": "1996"})
+        response = self.client.get(self.url, {"genre": "electronic", "year_from": "1996"})
         self.assertEqual(len(self._results(response)), 0)
 
     def test_ordering_by_price_ascending(self):
@@ -98,14 +98,14 @@ class ArtistEndpointTests(APITestCase):
     def test_artist_detail_includes_biography_and_releases(self):
         self.artist.biography = "British electronic musician..."
         self.artist.save()
-        url = reverse("artist-detail", kwargs={"slug": self.artist.slug})
+        url = reverse("catalog:artist-detail", kwargs={"slug": self.artist.slug})
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["biography"], "British electronic musician...")
         self.assertEqual(len(response.data["releases"]), 1)
 
     def test_artist_list_does_not_include_biography(self):
-        url = reverse("artist-list")
+        url = reverse("catalog:artist-list")
         response = self.client.get(url)
         self.assertNotIn("biography", response.data[0])
 
@@ -121,7 +121,7 @@ class SavedReleaseTests(APITestCase):
             username="other", email="other@example.com", password="pass12345"
         )
         self.release, _ = make_release()
-        self.url = reverse("saved-release-list")
+        self.url = reverse("catalog:saved-release-list")
 
     def test_guest_cannot_access_saved_albums(self):
         response = self.client.get(self.url)
@@ -148,7 +148,7 @@ class SavedReleaseTests(APITestCase):
     def test_user_can_unsave_own_album(self):
         saved = SavedRelease.objects.create(user=self.user, release=self.release)
         self.client.force_authenticate(user=self.user)
-        url = reverse("saved-release-detail", kwargs={"pk": saved.pk})
+        url = reverse("catalog:saved-release-detail", kwargs={"pk": saved.pk})
         response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(SavedRelease.objects.filter(pk=saved.pk).exists())
@@ -156,6 +156,6 @@ class SavedReleaseTests(APITestCase):
     def test_user_cannot_delete_another_users_saved_album(self):
         saved = SavedRelease.objects.create(user=self.other_user, release=self.release)
         self.client.force_authenticate(user=self.user)
-        url = reverse("saved-release-detail", kwargs={"pk": saved.pk})
+        url = reverse("catalog:saved-release-detail", kwargs={"pk": saved.pk})
         response = self.client.delete(url)
         self.assertIn(response.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))

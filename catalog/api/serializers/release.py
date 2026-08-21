@@ -64,5 +64,13 @@ class SavedReleaseSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at"]
 
     def create(self, validated_data):
-        validated_data["user"] = self.context["request"].user
+        user = self.context["request"].user
+        release = validated_data["release"]
+
+        if SavedRelease.objects.filter(user=user, release=release).exists():
+            raise serializers.ValidationError(
+                {"detail": "Цей альбом вже збережено."}
+            )
+
+        validated_data["user"] = user
         return super().create(validated_data)
