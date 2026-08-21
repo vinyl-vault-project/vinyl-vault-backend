@@ -389,4 +389,4 @@ pyrightconfig.json
 .ionide
 
 # data
-data/
+#data/
