@@ -107,7 +107,7 @@ class ArtistEndpointTests(APITestCase):
     def test_artist_list_does_not_include_biography(self):
         url = reverse("catalog:artist-list")
         response = self.client.get(url)
-        self.assertNotIn("biography", response.data[0])
+        self.assertNotIn("biography", response.data["results"][0])
 
 
 class SavedReleaseTests(APITestCase):
@@ -143,7 +143,7 @@ class SavedReleaseTests(APITestCase):
         SavedRelease.objects.create(user=self.other_user, release=self.release)
         self.client.force_authenticate(user=self.user)
         response = self.client.get(self.url)
-        self.assertEqual(len(response.data), 0)
+        self.assertEqual(len(response.data["results"]), 0)
 
     def test_user_can_unsave_own_album(self):
         saved = SavedRelease.objects.create(user=self.user, release=self.release)
