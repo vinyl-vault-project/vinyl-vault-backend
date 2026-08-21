@@ -24,6 +24,7 @@ class OrderViewSet(
     serializer_class = OrderDetailSerializer
     permission_classes = (IsAuthenticated,)
     lookup_field = "order_number"
+    pagination_class = None
 
     def _base_queryset(self):
         queryset = Order.objects.all()
