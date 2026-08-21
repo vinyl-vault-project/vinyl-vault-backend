@@ -1,5 +1,5 @@
 from django.db.models import Prefetch
-from drf_spectacular.utils import OpenApiResponse, extend_schema
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -20,6 +20,7 @@ class OrderViewSet(
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
 ):
+    queryset = Order.objects.none()
     serializer_class = OrderDetailSerializer
     permission_classes = (IsAuthenticated,)
     lookup_field = "order_number"
@@ -56,6 +57,52 @@ class OrderViewSet(
         if self.action == "list":
             return OrderListSerializer
         return self.serializer_class
+
+    @extend_schema(
+        summary="List the current user's orders",
+        description=(
+            "Return the authenticated user's orders, newest first. Each order "
+            "includes the product covers and quantities needed for the order "
+            "history page."
+        ),
+        responses={
+            status.HTTP_200_OK: OrderListSerializer(many=True),
+            status.HTTP_401_UNAUTHORIZED: OpenApiResponse(
+                description="A valid JWT access token is required."
+            ),
+        },
+        tags=["Orders"],
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        summary="Get an order's details",
+        description=(
+            "Return one order owned by the authenticated user, including its "
+            "items, totals, and checkout data snapshot."
+        ),
+        parameters=[
+            OpenApiParameter(
+                name="order_number",
+                type=str,
+                location=OpenApiParameter.PATH,
+                description="The public order number, for example VV-ABC123.",
+            )
+        ],
+        responses={
+            status.HTTP_200_OK: OrderDetailSerializer,
+            status.HTTP_401_UNAUTHORIZED: OpenApiResponse(
+                description="A valid JWT access token is required."
+            ),
+            status.HTTP_404_NOT_FOUND: OpenApiResponse(
+                description="The order was not found."
+            ),
+        },
+        tags=["Orders"],
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
 
     @extend_schema(
         summary="Create an order from the current user's cart",
