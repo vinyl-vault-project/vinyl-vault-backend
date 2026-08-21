@@ -4,6 +4,7 @@ from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
 from catalog.models import Product
+from orders.exceptions import OrderCancellationConflict
 from orders.models import Cart, CartItem, Order, OrderItem
 
 
@@ -48,9 +49,7 @@ def checkout(*, user, checkout_data):
             .filter(id__in=product_ids)
             .order_by("pk")
         )
-        locked_products_by_id = {
-            product.pk: product for product in locked_products
-        }
+        locked_products_by_id = {product.pk: product for product in locked_products}
 
         for item in cart_items:
             product = locked_products_by_id[item.product_id]
@@ -104,3 +103,34 @@ def checkout(*, user, checkout_data):
         fill_missing_user_profile(user=user, order=order)
 
     return order
+
+
+def cancel_order(*, order):
+    with transaction.atomic():
+        locked_order = Order.objects.select_for_update().get(pk=order.pk)
+
+        if locked_order.status != Order.OrderStatus.PENDING:
+            raise OrderCancellationConflict()
+
+        order_items = list(
+            OrderItem.objects.filter(order=locked_order).order_by("product_id")
+        )
+
+        product_ids = [item.product_id for item in order_items]
+        products = list(
+            Product.objects.select_for_update()
+            .filter(id__in=product_ids)
+            .order_by("id")
+        )
+        products_by_id = {product.pk: product for product in products}
+
+        for item in order_items:
+            product = products_by_id[item.product_id]
+            product.stock_quantity += item.quantity
+
+        Product.objects.bulk_update(list(products_by_id.values), ["stock_quantity"])
+
+        locked_order.status = Order.OrderStatus.CANCELED
+        locked_order.save(update_fields=["status", "updated_at"])
+
+    return locked_order
