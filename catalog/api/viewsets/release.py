@@ -88,7 +88,10 @@ class SavedReleaseViewSet(
 
     def get_queryset(self):
         # користувач бачить лише власні збережені альбоми
-        return SavedRelease.objects.filter(user=self.request.user).select_related("release")
+        return (SavedRelease.objects.filter(user=self.request.user)
+                .select_related("release")
+                .order_by("-created_at")
+                )
 
     def perform_destroy(self, instance):
         if instance.user != self.request.user:
