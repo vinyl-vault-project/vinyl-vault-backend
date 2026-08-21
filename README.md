@@ -48,6 +48,11 @@ vinyl-vault-backend/
 |   `-- urls.py           # Authentication routes
 |-- catalog/
 |   |-- models/           # Music catalog and physical product models
+|   |-- api/
+|   |   |-- serializers/  # Release, Artist, Track, Product, SavedRelease schemas
+|   |   |-- viewsets/     # Release, Artist and SavedRelease API views
+|   |   `-- pagination.py
+|   |-- urls.py           # Catalog and Saved Albums routes
 |   `-- admin.py          # Catalog administration configuration
 |-- orders/
 |   |-- models/           # Cart and CartItem models
@@ -56,6 +61,7 @@ vinyl-vault-backend/
 |   `-- urls.py           # Cart routes
 |-- tests/
 |   |-- users/            # User model and authentication API tests
+|   |-- catalog/          # Catalog and Saved Albums model and API tests
 |   `-- orders/           # Cart model and API tests
 |-- .env.example          # Environment variable template
 |-- .dockerignore
@@ -201,6 +207,13 @@ settings.
 | `POST` | `/api/v1/auth/token/refresh/` | Exchange a refresh token for a new access token |
 | `POST` | `/api/v1/auth/logout/` | Blacklist a refresh token |
 | `GET` | `/api/v1/auth/me/` | Return the authenticated user's profile |
+| `GET` | `/api/v1/releases/` | List releases with search, filters and ordering |
+| `GET` | `/api/v1/releases/{slug}/` | Return one release with tracklist and products |
+| `GET` | `/api/v1/artists/{slug}/` | Return artist details and related releases |
+| `GET` | `/api/v1/catalog/filters/` | Return available genres, styles, countries and year range |
+| `GET` | `/api/v1/saved/` | List the authenticated user's saved albums |
+| `POST` | `/api/v1/saved/` | Save an album |
+| `DELETE` | `/api/v1/saved/{id}/` | Remove a saved album |
 | `GET` | `/api/v1/cart/` | Return the authenticated user's cart |
 | `POST` | `/api/v1/cart/items/` | Add a product to the cart |
 | `PATCH` | `/api/v1/cart/items/{item_id}/` | Update a cart item quantity |
@@ -344,6 +357,154 @@ Content-Type: application/json
 Logout blacklists the refresh token. The frontend must also remove its stored
 access and refresh tokens.
 
+## Catalog API
+ 
+Catalog endpoints are public — available to both Guests and authenticated Users.
+ 
+### List and search releases
+ 
+```
+GET /api/v1/releases/
+```
+ 
+| Parameter | Example | Description |
+|---|---|---|
+| `search` | `?search=DJ Shadow` | Album title OR artist name, case-insensitive, partial match |
+| `artist` | `?artist=dj-shadow` | Exact filter by artist slug |
+| `country` | `?country=United Kingdom` | Filters on `Product.pressing_country`; comma-separated values are OR'd |
+| `genre` | `?genre=electronic` | Comma-separated values are OR'd |
+| `style` | `?style=idm,ambient` | Comma-separated values are OR'd |
+| `year_from`, `year_to` | `?year_from=1990&year_to=2000` | `release_year` range |
+| `ordering` | `?ordering=price` / `-price` / `title` / `-title` | Sort order |
+ 
+Different parameter groups are combined with AND. Results are paginated (see below). An empty result returns `200 OK` with `"results": []`, never `404`.
+ 
+```json
+{
+  "count": 2,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": 1,
+      "slug": "endtroducing",
+      "title": "Endtroducing.....",
+      "cover_url": "https://...",
+      "release_year": 1996,
+      "artists": [{"id": 1, "name": "DJ Shadow", "slug": "dj-shadow", "image_url": "...", "origin_country": "US"}],
+      "price": "20.00"
+    }
+  ]
+}
+```
+ 
+### Release detail
+ 
+```
+GET /api/v1/releases/{slug}/
+```
+Returns full release information including tracklist and available products:
+```json
+{
+  "id": 1,
+  "slug": "endtroducing",
+  "title": "Endtroducing.....",
+  "description": "...",
+  "release_year": 1996,
+  "cover_url": "https://...",
+  "artists": [{"id": 1, "name": "DJ Shadow", "slug": "dj-shadow"}],
+  "genres": [{"id": 1, "name": "Electronic", "slug": "electronic"}],
+  "styles": [{"id": 1, "name": "Trip Hop", "slug": "trip-hop"}],
+  "tracks": [
+    {"id": 1, "side": "A", "position": 1, "title": "Best Foot Forward", "duration_seconds": 48, "audio_preview_url": "https://..."}
+  ],
+  "products": [
+    {"id": 1, "pressing_country": "US", "price": "20.00", "stock_quantity": 5, "is_active": true}
+  ]
+}
+```
+Returns `404 Not Found` if no release matches the given slug.
+ 
+### Artist detail
+ 
+```
+GET /api/v1/artists/{slug}/
+```
+Populates the Artist Information Modal — there is no separate Artist page.
+```json
+{
+  "id": 1,
+  "name": "DJ Shadow",
+  "slug": "dj-shadow",
+  "image_url": "https://...",
+  "biography": "American record producer...",
+  "related_releases": [
+    {"slug": "endtroducing", "title": "Endtroducing.....", "release_year": 1996, "cover_url": "https://..."}
+  ]
+}
+```
+`related_releases` is `[]`, not an error, if the artist has no releases. Returns `404 Not Found` if no artist matches the given slug.
+ 
+### Available filters
+ 
+```
+GET /api/v1/catalog/filters/
+```
+Used to populate the Filters Modal dynamically.
+```json
+{
+  "genres": [{"name": "Electronic", "slug": "electronic"}],
+  "styles": [{"name": "IDM", "slug": "idm"}],
+  "countries": ["UK", "US", "Germany", "Japan"],
+  "year_range": {"min": 1955, "max": 2019}
+}
+```
+ 
+## Saved Albums API
+ 
+The Saved Albums API is available only to authenticated users. Send the JWT access token with every request.
+ 
+### List saved albums
+ 
+```
+GET /api/v1/saved/
+Authorization: Bearer <access-token>
+```
+```json
+{
+  "count": 1,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": 3,
+      "release": {"id": 1, "slug": "endtroducing", "title": "Endtroducing.....", "cover_url": "...", "artists": [{"name": "DJ Shadow"}]},
+      "created_at": "2026-08-21T12:00:00Z"
+    }
+  ]
+}
+```
+An empty list returns `"results": []`, `"count": 0`.
+ 
+### Save an album
+ 
+```
+POST /api/v1/saved/
+Authorization: Bearer <access-token>
+Content-Type: application/json
+ 
+{ "release_id": 1 }
+```
+Returns `201 Created` with the created record. Returns `400 Bad Request` if the release is already saved by this user (`unique(user, release)`).
+ 
+### Remove a saved album
+ 
+```
+DELETE /api/v1/saved/{id}/
+Authorization: Bearer <access-token>
+```
+`{id}` is the `SavedRelease` record id from the list response, not the release id. Returns `204 No Content`. Returns `404 Not Found` if the record does not exist or belongs to another user — intentionally not `403`, to avoid confirming another user's saved albums.
+
 ## Cart API
 
 The Cart API is available only to authenticated users. Send the JWT access token
@@ -469,6 +630,19 @@ A successful deletion returns `204 No Content`.
 
 Cart operations never reserve or decrement stock. Current stock and prices must
 be validated again during Checkout, which is outside the scope of this API.
+
+## Pagination
+ 
+`GET /api/v1/releases/` and `GET /api/v1/saved/` use `PageNumberPagination` (global `DEFAULT_PAGINATION_CLASS` in `settings.py`). Response format:
+```json
+{
+  "count": 42,
+  "next": "http://localhost:8000/api/v1/releases/?page=2",
+  "previous": null,
+  "results": [ /* items */ ]
+}
+```
+Parameters: `?page=2`, and `?page_size=20` where enabled. Endpoints that return a single object (`GET /releases/{slug}/`, `GET /artists/{slug}/`, `GET /cart/`) are not wrapped in this format — they return the object directly.
 
 ## Frontend integration
 
