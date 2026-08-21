@@ -55,10 +55,11 @@ vinyl-vault-backend/
 |   |-- urls.py           # Catalog and Saved Albums routes
 |   `-- admin.py          # Catalog administration configuration
 |-- orders/
-|   |-- models/           # Cart and CartItem models
-|   |-- serializers.py    # Cart request and response schemas
-|   |-- views.py          # Cart API views and business validation
-|   `-- urls.py           # Cart routes
+|   |-- models/           # Cart and order persistence models
+|   |-- serializers/      # Separate Cart and Order API schemas
+|   |-- services/         # Atomic order checkout operations
+|   |-- views/            # Separate Cart and Order API views
+|   `-- urls.py           # Cart and Order routes
 |-- tests/
 |   |-- users/            # User model and authentication API tests
 |   |-- catalog/          # Catalog and Saved Albums model and API tests

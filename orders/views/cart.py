@@ -1,7 +1,6 @@
 from django.db import transaction
 from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404
-
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import generics, status, viewsets
 from rest_framework.exceptions import ValidationError
@@ -9,8 +8,8 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from catalog.models import Product
-from orders.models.cart import Cart, CartItem
-from orders.serializers import (
+from orders.models import Cart, CartItem
+from orders.serializers.cart import (
     CartItemCreateSerializer,
     CartItemReadSerializer,
     CartItemUpdateSerializer,
@@ -20,7 +19,7 @@ from orders.serializers import (
 
 class CartView(generics.RetrieveAPIView):
     serializer_class = CartSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = (IsAuthenticated,)
 
     @extend_schema(
         summary="Get the current user's cart",
@@ -49,7 +48,7 @@ class CartView(generics.RetrieveAPIView):
 
 class CartItemViewSet(viewsets.GenericViewSet):
     serializer_class = CartItemReadSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = (IsAuthenticated,)
     lookup_url_kwarg = "item_id"
 
     def get_serializer_class(self):
@@ -61,41 +60,11 @@ class CartItemViewSet(viewsets.GenericViewSet):
         return self.serializer_class
 
     def get_queryset(self):
-        queryset = CartItem.objects.select_related(
-            "cart", "product__release"
-        ).prefetch_related("product__release__artists")
-
-        if not self.request.user.is_authenticated:
-            return queryset.none()
-
-        return queryset.filter(cart__user=self.request.user)
-
-    @staticmethod
-    def _validate_product(product, quantity):
-        if not product.is_active:
-            raise ValidationError(
-                {"product_id": "This product is not available."}
-            )
-        if quantity > product.stock_quantity:
-            raise ValidationError(
-                {
-                    "quantity": (
-                        "Quantity cannot exceed the available stock "
-                        f"of {product.stock_quantity}."
-                    )
-                }
-            )
-
-    def _get_locked_item(self):
-        queryset = CartItem.objects.filter(
-            cart__user=self.request.user
-        ).select_related("cart")
-        item = get_object_or_404(
-            queryset.select_for_update(),
-            pk=self.kwargs[self.lookup_url_kwarg],
+        return (
+            CartItem.objects.select_related("cart", "product__release")
+            .prefetch_related("product__release__artists")
+            .filter(cart__user=self.request.user)
         )
-        self.check_object_permissions(self.request, item)
-        return item
 
     def _serialize_item(self, item_id):
         item = self.get_queryset().get(pk=item_id)

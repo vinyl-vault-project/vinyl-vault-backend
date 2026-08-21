@@ -1,10 +1,12 @@
 from django.urls import include, path
-from rest_framework.routers import SimpleRouter
+from rest_framework.routers import DefaultRouter
 
-from orders.views import CartItemViewSet, CartView
+from orders.views.cart import CartItemViewSet, CartView
+from orders.views.order import OrderViewSet
 
-router = SimpleRouter()
+router = DefaultRouter()
 router.register("cart/items", CartItemViewSet, basename="cart-item")
+router.register("orders", OrderViewSet, basename="order")
 
 app_name = "orders"
 
