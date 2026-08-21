@@ -128,7 +128,7 @@ def cancel_order(*, order):
             product = products_by_id[item.product_id]
             product.stock_quantity += item.quantity
 
-        Product.objects.bulk_update(list(products_by_id.values), ["stock_quantity"])
+        Product.objects.bulk_update(list(products_by_id.values()), ["stock_quantity"])
 
         locked_order.status = Order.OrderStatus.CANCELED
         locked_order.save(update_fields=["status", "updated_at"])
