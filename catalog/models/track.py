@@ -4,8 +4,18 @@ from catalog.models.release import Release
 
 
 class Track(models.Model):
+    class Side(models.TextChoices):
+        A = "A", "A"
+        B = "B", "B"
+        C = "C", "C"
+        D = "D", "D"
+        E = "E", "E"
+        F = "F", "F"
+        G = "G", "G"
+        H = "H", "H"
+
     release = models.ForeignKey(Release, on_delete=models.CASCADE, related_name="tracks")
-    side = models.CharField(max_length=2, blank=True)
+    side = models.CharField(max_length=1, choices=Side.choices, blank=True)
     position = models.PositiveIntegerField()
     title = models.CharField(max_length=255)
     duration_seconds = models.PositiveIntegerField(null=True, blank=True)
