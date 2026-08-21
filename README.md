@@ -28,7 +28,9 @@ The repository currently contains the backend foundation and the first MVP APIs:
 - custom user model with email-based authentication;
 - JWT registration, login, refresh, logout, and current-user endpoints;
 - catalog database models for releases and physical products;
-- an authenticated, server-side Cart API with stock and ownership validation.
+- an authenticated, server-side Cart API with stock and ownership validation;
+- an authenticated Order API with atomic checkout, order history and details;
+- pending-order cancellation with atomic stock restoration.
 
 ## Project structure
 
@@ -55,14 +57,15 @@ vinyl-vault-backend/
 |   |-- urls.py           # Catalog and Saved Albums routes
 |   `-- admin.py          # Catalog administration configuration
 |-- orders/
-|   |-- models/           # Cart and CartItem models
-|   |-- serializers.py    # Cart request and response schemas
-|   |-- views.py          # Cart API views and business validation
-|   `-- urls.py           # Cart routes
+|   |-- models/           # Cart and order persistence models
+|   |-- serializers/      # Separate Cart and Order API schemas
+|   |-- services/         # Cart mutations and atomic order operations
+|   |-- views/            # Separate Cart and Order API views
+|   `-- urls.py           # Cart and Order routes
 |-- tests/
 |   |-- users/            # User model and authentication API tests
 |   |-- catalog/          # Catalog and Saved Albums model and API tests
-|   `-- orders/           # Cart model and API tests
+|   `-- orders/           # Cart and Order model and API tests
 |-- .env.example          # Environment variable template
 |-- .dockerignore
 |-- .gitignore
@@ -218,6 +221,10 @@ settings.
 | `POST` | `/api/v1/cart/items/` | Add a product to the cart |
 | `PATCH` | `/api/v1/cart/items/{item_id}/` | Update a cart item quantity |
 | `DELETE` | `/api/v1/cart/items/{item_id}/` | Remove an item from the cart |
+| `POST` | `/api/v1/orders/` | Atomically create an order from the current cart |
+| `GET` | `/api/v1/orders/` | Return the current user's order history |
+| `GET` | `/api/v1/orders/{order_number}/` | Return the current user's order details |
+| `POST` | `/api/v1/orders/{order_number}/cancel/` | Cancel a pending order and restore stock |
 | `GET` | `/api/v1/docs/` | Interactive Swagger UI |
 | `GET` | `/api/v1/schema/` | OpenAPI schema |
 | varies | `/admin/` | Django administration site |
@@ -231,7 +238,8 @@ the Django application responds; it does not verify PostgreSQL availability.
 The API uses JWT bearer authentication. Access tokens authorize API requests,
 while refresh tokens are used to obtain new access tokens. Registration, login,
 token refresh, and logout are public endpoints. Protected endpoints such as
-`/api/v1/auth/me/` and all Cart endpoints require a valid access token.
+`/api/v1/auth/me/` and all Cart and Order endpoints require a valid access
+token.
 
 ### Register
 
@@ -628,8 +636,204 @@ A successful deletion returns `204 No Content`.
 | `404 Not Found` | The CartItem does not exist or belongs to another user |
 | `409 Conflict` | The Product is already present in the cart |
 
-Cart operations never reserve or decrement stock. Current stock and prices must
-be validated again during Checkout, which is outside the scope of this API.
+Cart operations never reserve or decrement stock. Current stock and prices are
+validated again by the Order API during checkout.
+
+## Order API
+
+The Order API is available only to authenticated users. Every list, detail, and
+cancel query is restricted to orders owned by the current user. An order that
+belongs to another user is returned as `404 Not Found` rather than exposing its
+existence.
+
+The MVP supports two order statuses:
+
+| Status | Meaning |
+| --- | --- |
+| `PENDING` | The order was created and its stock is reserved |
+| `CANCELED` | The user canceled the order and its stock was restored |
+
+### Create an order (checkout)
+
+```http
+POST /api/v1/orders/
+Authorization: Bearer <access-token>
+Content-Type: application/json
+```
+
+```json
+{
+  "first_name": "Sem",
+  "last_name": "Bib",
+  "email": "sem@example.com",
+  "phone": "+49123456789",
+  "city": "Pforzheim",
+  "shipping_address": "Hauptstr. 12",
+  "postal_code": "75172",
+  "country": "Germany"
+}
+```
+
+A successful checkout returns `201 Created` with the same representation as the
+order detail endpoint. Checkout is performed in one database transaction. The
+backend:
+
+1. locks and validates the current Cart and its items;
+2. locks the corresponding Products and rechecks `is_active` and stock;
+3. calculates the total from the current Product prices;
+4. creates the pending Order and its OrderItems;
+5. saves each current price as an OrderItem `unit_price` snapshot;
+6. decrements stock and clears the Cart items;
+7. fills only missing `first_name`, `last_name`, `phone`, and `address` fields in
+   the user's profile.
+
+If any step fails, the transaction is rolled back: no Order is left behind,
+stock is not changed, and Cart items remain in place.
+
+The submitted contact and shipping fields are always stored on the Order as a
+checkout-data snapshot. Existing user profile values are not overwritten.
+
+### List the current user's orders
+
+```http
+GET /api/v1/orders/
+Authorization: Bearer <access-token>
+```
+
+Orders are returned newest first. The compact response contains the release
+covers and quantities needed by the account page:
+
+```json
+[
+  {
+    "id": 2,
+    "order_number": "VV-0123456789ABCDEF0123456789ABCDEF",
+    "status": "PENDING",
+    "items": [
+      {
+        "id": 4,
+        "product": {
+          "id": 7,
+          "release": {
+            "id": 5,
+            "title": "Endtroducing.....",
+            "cover_url": "https://example.com/covers/endtroducing.jpg"
+          }
+        },
+        "quantity": 2
+      }
+    ],
+    "total_quantity": 2,
+    "total": "69.98",
+    "created_at": "2026-08-21T10:30:00Z"
+  }
+]
+```
+
+`total_quantity` is the sum of all OrderItem quantities, not the number of
+distinct products.
+
+### Get order details
+
+```http
+GET /api/v1/orders/VV-0123456789ABCDEF0123456789ABCDEF/
+Authorization: Bearer <access-token>
+```
+
+```json
+{
+  "id": 2,
+  "order_number": "VV-0123456789ABCDEF0123456789ABCDEF",
+  "status": "PENDING",
+  "items": [
+    {
+      "id": 4,
+      "product": {
+        "id": 7,
+        "release": {
+          "id": 5,
+          "slug": "endtroducing",
+          "title": "Endtroducing.....",
+          "cover_url": "https://example.com/covers/endtroducing.jpg",
+          "release_year": 1996,
+          "artists": [
+            {
+              "id": 2,
+              "name": "DJ Shadow",
+              "slug": "dj-shadow"
+            }
+          ]
+        },
+        "labels": [
+          {
+            "id": 3,
+            "name": "Mo' Wax",
+            "slug": "mo-wax"
+          }
+        ]
+      },
+      "quantity": 2,
+      "unit_price": "34.99",
+      "subtotal": "69.98"
+    }
+  ],
+  "line_items_count": 1,
+  "subtotal": "69.98",
+  "total": "69.98",
+  "checkout_data": {
+    "first_name": "Sem",
+    "last_name": "Bib",
+    "email": "sem@example.com",
+    "phone": "+49123456789",
+    "city": "Pforzheim",
+    "shipping_address": "Hauptstr. 12",
+    "postal_code": "75172",
+    "country": "Germany"
+  },
+  "created_at": "2026-08-21T10:30:00Z",
+  "updated_at": "2026-08-21T10:30:00Z"
+}
+```
+
+`line_items_count` is the number of distinct OrderItems. Item subtotals and the
+order subtotal use the saved `unit_price`, so later Product price changes do not
+alter historical totals. Product and release metadata are read through the
+current catalog records and are not stored as snapshots in the current MVP.
+
+### Cancel an order
+
+```http
+POST /api/v1/orders/VV-0123456789ABCDEF0123456789ABCDEF/cancel/
+Authorization: Bearer <access-token>
+```
+
+Only an owned `PENDING` order can be canceled. The operation locks the Order and
+its Products, restores the quantities from its OrderItems, and changes the
+status to `CANCELED` in one transaction. A successful request returns `200 OK`
+with the updated order detail representation.
+
+Trying to cancel the same order again returns `409 Conflict` and does not restore
+stock a second time:
+
+```json
+{
+  "detail": "Only pending orders can be canceled."
+}
+```
+
+Because payment is outside the current MVP, cancellation does not initiate a
+refund.
+
+### Validation and status codes
+
+| Status | Meaning |
+| --- | --- |
+| `200 OK` | Order list/detail returned or a pending order canceled |
+| `201 Created` | Checkout completed and the Order was created |
+| `400 Bad Request` | Invalid checkout data, empty Cart, inactive Product, or insufficient stock |
+| `401 Unauthorized` | A valid JWT access token was not provided |
+| `404 Not Found` | The Order does not exist or belongs to another user |
+| `409 Conflict` | The Order is not pending and cannot be canceled |
 
 ## Pagination
  
