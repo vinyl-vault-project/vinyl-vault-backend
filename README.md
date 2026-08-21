@@ -57,7 +57,7 @@ vinyl-vault-backend/
 |-- orders/
 |   |-- models/           # Cart and order persistence models
 |   |-- serializers/      # Separate Cart and Order API schemas
-|   |-- services/         # Atomic order checkout operations
+|   |-- services/         # Cart mutations and atomic order operations
 |   |-- views/            # Separate Cart and Order API views
 |   `-- urls.py           # Cart and Order routes
 |-- tests/

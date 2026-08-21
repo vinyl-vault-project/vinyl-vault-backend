@@ -1,19 +1,20 @@
-from django.db import transaction
 from django.db.models import Prefetch
-from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import generics, status, viewsets
-from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from catalog.models import Product
 from orders.models import Cart, CartItem
 from orders.serializers.cart import (
     CartItemCreateSerializer,
     CartItemReadSerializer,
     CartItemUpdateSerializer,
     CartSerializer,
+)
+from orders.services.cart import (
+    add_cart_item,
+    remove_cart_item,
+    update_cart_item_quantity,
 )
 
 
@@ -37,13 +38,13 @@ class CartView(generics.RetrieveAPIView):
 
     def get_object(self):
         cart, _ = Cart.objects.get_or_create(user=self.request.user)
-        items = CartItem.objects.select_related(
-            "product__release"
-        ).prefetch_related("product__release__artists")
+        items = CartItem.objects.select_related("product__release").prefetch_related(
+            "product__release__artists"
+        )
 
-        return Cart.objects.prefetch_related(
-            Prefetch("items", queryset=items)
-        ).get(pk=cart.pk)
+        return Cart.objects.prefetch_related(Prefetch("items", queryset=items)).get(
+            pk=cart.pk
+        )
 
 
 class CartItemViewSet(viewsets.GenericViewSet):
@@ -99,26 +100,11 @@ class CartItemViewSet(viewsets.GenericViewSet):
         quantity = serializer.validated_data["quantity"]
         requested_product = serializer.validated_data["product"]
 
-        with transaction.atomic():
-            cart, _ = Cart.objects.get_or_create(user=request.user)
-            cart = Cart.objects.select_for_update().get(pk=cart.pk)
-            product = Product.objects.select_for_update().get(
-                pk=requested_product.pk
-            )
-            self._validate_product(product, quantity)
-
-            if CartItem.objects.filter(cart=cart, product=product).exists():
-                return Response(
-                    {"detail": "Product is already in the cart."},
-                    status=status.HTTP_409_CONFLICT,
-                )
-
-            item = CartItem.objects.create(
-                cart=cart,
-                product=product,
-                quantity=quantity,
-            )
-            cart.save(update_fields=["updated_at"])
+        item = add_cart_item(
+            user=request.user,
+            requested_product=requested_product,
+            quantity=quantity,
+        )
 
         return Response(
             self._serialize_item(item.pk),
@@ -148,16 +134,11 @@ class CartItemViewSet(viewsets.GenericViewSet):
         serializer.is_valid(raise_exception=True)
         quantity = serializer.validated_data["quantity"]
 
-        with transaction.atomic():
-            item = self._get_locked_item()
-            product = Product.objects.select_for_update().get(
-                pk=item.product_id
-            )
-            self._validate_product(product, quantity)
-
-            item.quantity = quantity
-            item.save(update_fields=["quantity"])
-            item.cart.save(update_fields=["updated_at"])
+        item = update_cart_item_quantity(
+            user=request.user,
+            item_id=self.kwargs[self.lookup_url_kwarg],
+            quantity=quantity,
+        )
 
         return Response(
             self._serialize_item(item.pk),
@@ -181,10 +162,9 @@ class CartItemViewSet(viewsets.GenericViewSet):
         tags=["Cart"],
     )
     def destroy(self, request, *args, **kwargs):
-        with transaction.atomic():
-            item = self._get_locked_item()
-            cart = item.cart
-            item.delete()
-            cart.save(update_fields=["updated_at"])
+        remove_cart_item(
+            user=request.user,
+            item_id=self.kwargs[self.lookup_url_kwarg],
+        )
 
         return Response(status=status.HTTP_204_NO_CONTENT)
