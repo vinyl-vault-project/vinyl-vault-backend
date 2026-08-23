@@ -1,6 +1,7 @@
 from rest_framework import viewsets, mixins
 
-from catalog.api.serializers.artist import ArtistSerializer, ArtistDetailSerializer
+from catalog.api.serializers.artist import ArtistSerializer
+from catalog.api.serializers.artist_detail import ArtistDetailSerializer
 from catalog.models import Artist
 
 
