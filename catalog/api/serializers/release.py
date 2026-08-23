@@ -1,3 +1,4 @@
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from catalog.api.serializers.artist import ArtistSerializer
@@ -19,6 +20,7 @@ class ReleaseListSerializer(serializers.ModelSerializer):
         model = Release
         fields = ["id", "slug", "title", "cover_url", "release_year", "artists", "price"]
 
+    @extend_schema_field(serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True))
     def get_price(self, obj):
         # ціна активного товару; якщо кілька видань - беремо найдешевше активне
         product = obj.products.filter(is_active=True).order_by("price").first()
