@@ -868,6 +868,85 @@ Multiple allowed origins must be separated with commas:
 CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
+## Deployment
+
+The backend is deployed to [Render](https://render.com) as a Docker-based Web
+Service, with [Neon](https://neon.tech) as the managed PostgreSQL database.
+
+**Live URL:** https://vinyl-vault-backend-ppqo.onrender.com
+
+- Health check: https://vinyl-vault-backend-ppqo.onrender.com/api/v1/health/
+- Swagger UI: https://vinyl-vault-backend-ppqo.onrender.com/api/v1/docs/
+
+### Settings
+
+Production settings live in a separate module, `config.settings.prod`, imported
+from `config.settings.base` (shared) alongside `config.settings.dev` (local
+Docker Compose). This keeps production-only behavior — forced `DEBUG = False`,
+`whitenoise` static file serving, and HTTPS security headers (`SECURE_SSL_REDIRECT`,
+HSTS, secure cookies) — out of local development entirely, instead of gating it
+behind `if DEBUG:` conditionals in one shared file.
+
+`ALLOWED_HOSTS` reads from the `DJANGO_ALLOWED_HOSTS` environment variable and
+additionally appends Render's own `RENDER_EXTERNAL_HOSTNAME` when present, so
+the service works out of the box without hardcoding Render's generated domain.
+
+### Docker image
+
+`Dockerfile.prod` is a separate, production-only image — the local `Dockerfile`
+used by `docker-compose.yml` is unaffected. It installs dependencies, copies the
+project, and delegates startup to `entrypoint.sh`:
+
+```bash
+#!/bin/sh
+set -e
+
+python manage.py collectstatic --noinput
+python manage.py migrate --noinput
+
+exec gunicorn config.wsgi:application --bind 0.0.0.0:8000
+```
+
+`collectstatic` and `migrate` run here, at container start, rather than as a
+`RUN` step during the image build or as a separate Pre-Deploy Command. Both
+depend on environment variables (`DJANGO_SECRET_KEY`, database credentials) that
+are only available once the container is actually running — not during the
+build step — and Render's Pre-Deploy Command feature is restricted to paid
+instance types.
+
+### Database
+
+The production database runs on Neon. Neon's pooled connection endpoint (used
+for `POSTGRES_HOST`) does not support server-side cursors, so
+`DISABLE_SERVER_SIDE_CURSORS = True` is set on the `default` database
+connection in `config/settings/base.py`. Neon also requires SSL, configured via
+`OPTIONS: {"sslmode": "require"}` on the same connection.
+
+### Environment variables
+
+Set the following in the Render service's Environment settings (an Environment
+Group is recommended if more services are added later):
+
+| Variable | Notes |
+| --- | --- |
+| `DJANGO_SETTINGS_MODULE` | `config.settings.prod` |
+| `DJANGO_SECRET_KEY` | Distinct from local `.env` |
+| `JWT_SIGNING_KEY` | Distinct from `DJANGO_SECRET_KEY` |
+| `DJANGO_ALLOWED_HOSTS` | Optional — falls back to `RENDER_EXTERNAL_HOSTNAME` |
+| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT` | From the Neon connection details |
+| `CORS_ALLOWED_ORIGINS` | The deployed frontend origin |
+
+`.env` is never committed and is not shared between local Docker Compose and
+Render — each environment's variables are configured independently.
+
+### Known limitations
+
+- The free Render instance spins down after inactivity; the first request after
+  idling can take up to ~50 seconds.
+- Checkout price and stock validation is enforced server-side (see Order API),
+  but no payment provider is integrated — this remains outside the current MVP
+  scope.
+
 ## Running tests
 
 With Docker:
